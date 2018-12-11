@@ -144,33 +144,37 @@ const (
 // FarmDetails contains all information regarding a farm and the services.
 // See https://www.zevenet.com/zapidoc_ce_v3.1/#retrieve-farm-by-name
 type FarmDetails struct {
-	Certificates             []CertificateInfo   `json:"certlist"`
-	FarmName                 string              `json:"farmname"`
-	CiphersCustom            string              `json:"cipherc,omitempty"`
-	Ciphers                  FarmCiphers         `json:"ciphers,omitempty"`
-	ConnectionTimeoutSeconds int                 `json:"contimeout"`
-	DisableSSLv2             bool                `json:"disable_sslv2,string"`
-	DisableSSLv3             bool                `json:"disable_sslv3,string"`
-	DisableTLSv1             bool                `json:"disable_tlsv1,string"`
-	DisableTLSv11            bool                `json:"disable_tlsv1_1,string"`
-	DisableTLSv12            bool                `json:"disable_tlsv1_2,string"`
-	ErrorString414           string              `json:"error414"`
-	ErrorString500           string              `json:"error500"`
-	ErrorString501           string              `json:"error501"`
-	ErrorString503           string              `json:"error503"`
-	HTTPVerbs                FarmHTTPVerb        `json:"httpverb"`
-	Listener                 FarmListener        `json:"listener"`
-	RequestTimeoutSeconds    int                 `json:"reqtimeout"`
-	ResponseTimeoutSeconds   int                 `json:"restimeout"`
-	ResurrectIntervalSeconds int                 `json:"resurrectime"`
-	RewriteLocation          FarmRewriteLocation `json:"rewritelocation"`
-	Status                   FarmStatus          `json:"status"`
-	VirtualIP                string              `json:"vip"`
-	VirtualPort              int                 `json:"vport"`
-	Services                 []ServiceDetails    `json:"services"`
-	Backends                 []BackendDetails    `json:"backends"`           // l4xnat farms have these directly under services
-	Protocol                 string              `json:"protocol,omitempty"` //l4xnat advanced option
-	NATType                  string              `json:"nattype,omitempty"`  //l4xnat advanced option
+	Certificates                     []CertificateInfo   `json:"certlist"`
+	FarmName                         string              `json:"farmname"`
+	CiphersCustom                    string              `json:"cipherc,omitempty"`
+	Ciphers                          FarmCiphers         `json:"ciphers,omitempty"`
+	ConnectionTimeoutSeconds         int                 `json:"contimeout"`
+	DisableSSLv2                     bool                `json:"disable_sslv2,string"`
+	DisableSSLv3                     bool                `json:"disable_sslv3,string"`
+	DisableTLSv1                     bool                `json:"disable_tlsv1,string"`
+	DisableTLSv11                    bool                `json:"disable_tlsv1_1,string"`
+	DisableTLSv12                    bool                `json:"disable_tlsv1_2,string"`
+	ErrorString414                   string              `json:"error414"`
+	ErrorString500                   string              `json:"error500"`
+	ErrorString501                   string              `json:"error501"`
+	ErrorString503                   string              `json:"error503"`
+	HTTPVerbs                        FarmHTTPVerb        `json:"httpverb"`
+	Listener                         FarmListener        `json:"listener"`
+	RequestTimeoutSeconds            int                 `json:"reqtimeout"`
+	ResponseTimeoutSeconds           int                 `json:"restimeout"`
+	ResurrectIntervalSeconds         int                 `json:"resurrectime"`
+	RewriteLocation                  FarmRewriteLocation `json:"rewritelocation"`
+	Status                           FarmStatus          `json:"status"`
+	VirtualIP                        string              `json:"vip"`
+	VirtualPort                      int                 `json:"vport"`
+	Services                         []ServiceDetails    `json:"services"`
+	Backends                         []BackendDetails    `json:"backends"`           // l4xnat farms have these directly under services
+	Protocol                         string              `json:"protocol,omitempty"` // l4xnat advanced option
+	NATType                          string              `json:"nattype,omitempty"`  // l4xnat advanced option
+	FarmGuardianEnabled              bool                `json:"fgenabled,string"`   // l4xnat farms have fg at top level
+	FarmGuardianLogsEnabled          OptionalBool        `json:"fglog"`              // l4xnat farms have fg at top level
+	FarmGuardianScript               string              `json:"fgscript"`           // l4xnat farms have fg at top level
+	FarmGuardianCheckIntervalSeconds int                 `json:"fgtimecheck"`        // l4xnat farms have fg at top level
 }
 
 // String returns the farm's name and listener.
@@ -373,7 +377,28 @@ func (s *ZapiSession) CreateFarmAsHTTPS(farmName string, virtualIP string, virtu
 // UpdateFarm updates the HTTP/S farm.
 // This method does *not* update the *services*. Use *UpdateService()* instead.
 func (s *ZapiSession) UpdateFarm(farm *FarmDetails) error {
-	return s.put(farm, "farms", farm.FarmName)
+	err := s.put(farm, "farms", farm.FarmName)
+	if err != nil {
+		return err
+	}
+	if farm.Listener == FarmListener_L4XNAT {
+
+		// update farm guardian
+		fg := farmguardianUpdate{
+			ServiceName:                      "",
+			FarmGuardianEnabled:              farm.FarmGuardianEnabled,
+			FarmGuardianScript:               farm.FarmGuardianScript,
+			FarmGuardianCheckIntervalSeconds: farm.FarmGuardianCheckIntervalSeconds,
+			FarmGuardianLogsEnabled:          farm.FarmGuardianLogsEnabled,
+		}
+
+		if fg.FarmGuardianScript == "" {
+			fg.FarmGuardianScript = "check_http -H HOST -p PORT"
+		}
+
+		return s.put(fg, "farms", farm.FarmName, "fg")
+	}
+	return nil
 }
 
 type farmAction struct {
