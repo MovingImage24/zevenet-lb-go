@@ -63,9 +63,10 @@ func (s *ZapiSession) GetAllFarms() ([]FarmInfo, error) {
 }
 
 type farmDetailsResponse struct {
-	Description string           `json:"description"`
-	Params      FarmDetails      `json:"params"`
-	Services    []ServiceDetails `json:"services"`
+	Description string             `json:"description"`
+	Params      FarmDetails        `json:"params"`
+	Services    []ServiceDetails   `json:"services"`
+	Backends    [][]BackendDetails `json:"backends"`
 }
 
 // FarmCiphers is an enumeration of possible selections of *Ciphers* to be used for an https listener.
@@ -102,8 +103,9 @@ const (
 type FarmListener string
 
 const (
-	FarmListener_HTTP  FarmListener = "http"
-	FarmListener_HTTPS FarmListener = "https"
+	FarmListener_HTTP   FarmListener = "http"
+	FarmListener_HTTPS  FarmListener = "https"
+	FarmListener_L4XNAT FarmListener = "l4xnat"
 )
 
 // FarmRewriteLocation is an enumeration of possible selections of *RewriteLocation* values.
@@ -166,6 +168,9 @@ type FarmDetails struct {
 	VirtualIP                string              `json:"vip"`
 	VirtualPort              int                 `json:"vport"`
 	Services                 []ServiceDetails    `json:"services"`
+	Backends                 []BackendDetails    `json:"backends"`           // l4xnat farms have these directly under services
+	Protocol                 string              `json:"protocol,omitempty"` //l4xnat advanced option
+	NATType                  string              `json:"nattype,omitempty"`  //l4xnat advanced option
 }
 
 // String returns the farm's name and listener.
@@ -187,6 +192,28 @@ func (fd *FarmDetails) IsRunning() bool {
 func (fd *FarmDetails) GetService(serviceName string) (*ServiceDetails, error) {
 	for _, s := range fd.Services {
 		if s.ServiceName == serviceName {
+			return &s, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// GetBackend retrieves a backend by its ID, or returns *nil* if not found.
+func (fd *FarmDetails) GetBackend(backendID int) (*BackendDetails, error) {
+	for _, s := range fd.Backends {
+		if s.ID == backendID {
+			return &s, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// GetBackendByAddress gets a backend by it's address - used for l4xnat farms only, returns *nil* if not found.
+func (fd *FarmDetails) GetBackendByAddress(ipAddress string, port int) (*BackendDetails, error) {
+	for _, s := range fd.Backends {
+		if s.IPAddress == ipAddress && (port <= 0 || s.Port == port) {
 			return &s, nil
 		}
 	}
@@ -226,6 +253,14 @@ func (s *ZapiSession) GetFarm(farmName string) (*FarmDetails, error) {
 
 				backend.FarmName = farmName
 				backend.ServiceName = service.ServiceName
+			}
+		}
+		if result.Params.Listener == FarmListener_L4XNAT {
+			// Backends is an array of arrays in the response so we take the first (and should be only) level.
+			for _, backend := range result.Backends[0] {
+				backend.FarmName = farmName
+				backend.ServiceName = ""
+				result.Params.Backends = append(result.Params.Backends, backend)
 			}
 		}
 	}
@@ -602,8 +637,14 @@ type backendCreate struct {
 	Port      int    `json:"port"`
 }
 
-// DeleteBackend will delete an existing backend (or do nothing if backend or service or farm is missing)
+// DeleteBackend backward-compatible signature.  Please use DeleteServiceBackend.
 func (s *ZapiSession) DeleteBackend(farmName string, serviceName string, backendId int) (bool, error) {
+	ret, err := s.DeleteServiceBackend(farmName, serviceName, backendId)
+	return ret, err
+}
+
+// DeleteServiceBackend will delete an existing backend (or do nothing if backend or service or farm is missing)
+func (s *ZapiSession) DeleteServiceBackend(farmName string, serviceName string, backendId int) (bool, error) {
 	// retrieve farm details
 	farm, err := s.GetFarm(farmName)
 
@@ -642,8 +683,43 @@ func (s *ZapiSession) DeleteBackend(farmName string, serviceName string, backend
 	return true, s.delete("farms", farmName, "services", serviceName, "backends", strconv.Itoa(backendId))
 }
 
-// CreateBackend creates a new backend on a service on a farm.
+// DeleteL4xnatBackend will delete an existing backend (or do nothing if backend or service or farm is missing)
+func (s *ZapiSession) DeleteL4xnatBackend(farmName string, backendId int) (bool, error) {
+	// retrieve farm details
+	farm, err := s.GetFarm(farmName)
+
+	if err != nil {
+		return false, err
+	}
+
+	// farm does not exist?
+	if farm == nil {
+		return false, nil
+	}
+
+	// does the backend exist?
+	backend, err := farm.GetBackend(backendId)
+
+	if err != nil {
+		return false, err
+	}
+
+	if backend == nil {
+		return false, nil
+	}
+
+	// delete the backend
+	return true, s.delete("farms", farmName, "backends", strconv.Itoa(backendId))
+}
+
+// CreateBackend backward-compatible signature.  Please use CreateServiceBackend.
 func (s *ZapiSession) CreateBackend(farmName string, serviceName string, backendIP string, backendPort int) (*BackendDetails, error) {
+	ret, err := s.CreateServiceBackend(farmName, serviceName, backendIP, backendPort)
+	return ret, err
+}
+
+// CreateServiceBackend creates a new backend on a service on a farm.
+func (s *ZapiSession) CreateServiceBackend(farmName string, serviceName string, backendIP string, backendPort int) (*BackendDetails, error) {
 	// create the backend
 	req := backendCreate{
 		IPAddress: backendIP,
@@ -670,6 +746,30 @@ func (s *ZapiSession) CreateBackend(farmName string, serviceName string, backend
 	}
 
 	return service.GetBackendByAddress(backendIP, backendPort)
+}
+
+// CreateL4xnatBackend creates a new backend on a l4xnat farm.
+func (s *ZapiSession) CreateL4xnatBackend(farmName string, backendIP string, backendPort int) (*BackendDetails, error) {
+	// create the backend
+	req := backendCreate{
+		IPAddress: backendIP,
+		Port:      backendPort,
+	}
+
+	err := s.post(req, "farms", farmName, "backends")
+
+	if err != nil {
+		return nil, err
+	}
+
+	// retrieve status
+	farm, err := s.GetFarm(farmName)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return farm.GetBackendByAddress(backendIP, backendPort)
 }
 
 // UpdateBackend updates a backend on a service on a farm.
