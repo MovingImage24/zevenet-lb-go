@@ -58,6 +58,7 @@ type RequestError struct {
 	Message     string `json:"message,omitempty"`
 	Description string `json:"description,omitempty"`
 	Response    string
+	err         bool `json:"error,omitempty"`
 }
 
 // Error returns the error message.
@@ -256,8 +257,11 @@ func (s *ZapiSession) checkError(resp []byte) error {
 	if err != nil {
 		return fmt.Errorf("%s\n%s", err.Error(), string(resp[:]))
 	}
-
-	reqError.Response = string(resp)
+	if reqError.err {
+		reqError.Response = reqError.Message
+	} else {
+		reqError.Response = string(resp)
+	}
 
 	return reqError
 }
