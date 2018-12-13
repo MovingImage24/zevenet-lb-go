@@ -383,6 +383,10 @@ func (s *ZapiSession) UpdateFarm(farm *FarmDetails) error {
 	}
 	if farm.Listener == FarmListener_L4XNAT {
 
+		if farm.FarmGuardianCheckIntervalSeconds == 0 {
+			farm.FarmGuardianCheckIntervalSeconds = 5 // This is the zevenet default and if it's not set, the api call fails
+		}
+
 		// update farm guardian
 		fg := farmguardianUpdate{
 			ServiceName:                      "",
