@@ -63,10 +63,10 @@ func (s *ZapiSession) GetAllFarms() ([]FarmInfo, error) {
 }
 
 type farmDetailsResponse struct {
-	Description string             `json:"description"`
-	Params      FarmDetails        `json:"params"`
-	Services    []ServiceDetails   `json:"services"`
-	Backends    [][]BackendDetails `json:"backends"`
+	Description string           `json:"description"`
+	Params      FarmDetails      `json:"params"`
+	Services    []ServiceDetails `json:"services"`
+	Backends    []BackendDetails `json:"backends"`
 }
 
 // FarmCiphers is an enumeration of possible selections of *Ciphers* to be used for an https listener.
@@ -261,7 +261,7 @@ func (s *ZapiSession) GetFarm(farmName string) (*FarmDetails, error) {
 		}
 		if result.Params.Listener == FarmListener_L4XNAT {
 			// Backends is an array of arrays in the response so we take the first (and should be only) level.
-			for _, backend := range result.Backends[0] {
+			for _, backend := range result.Backends {
 				backend.FarmName = farmName
 				backend.ServiceName = ""
 				result.Params.Backends = append(result.Params.Backends, backend)
